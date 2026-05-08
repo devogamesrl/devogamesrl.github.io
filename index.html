@@ -1,552 +1,351 @@
-MONGO_URL="mongodb://localhost:27017"
-DB_NAME="test_database"
-CORS_ORIGINS="*"
-RESEND_API_KEY="re_KhTLubqs_4taxTY3RC6RUPQRUqmRTKsoY"
-SENDER_EMAIL="onboarding@resend.dev"
-RECIPIENT_EMAIL="devogamesrl@gmail.com"
-/app/backend/server.py
-from fastapi import FastAPI, APIRouter, HTTPException
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import asyncio
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List
-import uuid
-from datetime import datetime, timezone
-import resend
 
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Resend setup
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
-RECIPIENT_EMAIL = os.environ.get('RECIPIENT_EMAIL', 'devogamesrl@gmail.com')
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
-
-# Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-)
-logger = logging.getLogger(__name__)
-
-# Create the main app without a prefix
-app = FastAPI()
-api_router = APIRouter(prefix="/api")
-
-
-# Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-
-class ContactCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=120)
-    email: EmailStr
-    subject: str = Field(default="Messaggio dal sito", max_length=200)
-    message: str = Field(..., min_length=1, max_length=5000)
-
-
-class ContactResponse(BaseModel):
-    id: str
-    status: str
-    email_sent: bool
-    message: str
-
-
-def _build_html(name: str, email: str, subject: str, message: str) -> str:
-    safe_msg = message.replace('\n', '<br>')
-    return f"""
-    <!DOCTYPE html>
-    <html>
-      <body style="font-family: Arial, sans-serif; background:#050505; padding:24px; color:#ffffff;">
-        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px; margin:auto; background:#111111; border:1px solid #2979FF;">
-          <tr>
-            <td style="padding:24px; border-bottom:1px solid #2979FF;">
-              <h1 style="margin:0; color:#2979FF; font-size:22px; letter-spacing:2px;">DEVOGAME &mdash; NUOVO MESSAGGIO</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:24px; color:#ffffff;">
-              <p style="margin:0 0 8px 0;"><strong style="color:#2979FF;">Nome:</strong> {name}</p>
-              <p style="margin:0 0 8px 0;"><strong style="color:#2979FF;">Email:</strong> {email}</p>
-              <p style="margin:0 0 16px 0;"><strong style="color:#2979FF;">Oggetto:</strong> {subject}</p>
-              <hr style="border:none; border-top:1px solid #2979FF; margin:16px 0;">
-              <p style="margin:0; line-height:1.6; color:#e5e5e5;">{safe_msg}</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 24px; border-top:1px solid #2979FF; color:#777; font-size:12px;">
-              Inviato dal form di contatto &mdash; devogame.com
-            </td>
-          </tr>
-        </table>
-      </body>
-    </html>
-    """
-
-
-# Routes
-@api_router.get("/")
-async def root():
-    return {"message": "DevoGame API is running"}
-
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_obj = StatusCheck(**input.model_dump())
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    await db.status_checks.insert_one(doc)
-    return status_obj
-
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    return status_checks
-
-
-@api_router.post("/contact", response_model=ContactResponse)
-async def create_contact(payload: ContactCreate):
-    contact_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    doc = {
-        "id": contact_id,
-        "name": payload.name,
-        "email": payload.email,
-        "subject": payload.subject,
-        "message": payload.message,
-        "created_at": now,
-        "email_sent": False,
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevoGame | Studio Italiano</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          'display': ['"Archivo Black"', '"Inter"', 'sans-serif'],
+          'mono-plex': ['"IBM Plex Mono"', 'monospace'],
+        },
+        animation: {
+          'marquee': 'marquee 40s linear infinite',
+        },
+        keyframes: {
+          marquee: {
+            '0%': { transform: 'translateX(0)' },
+            '100%': { transform: 'translateX(-50%)' },
+          }
+        }
+      }
     }
-    await db.contacts.insert_one(doc)
-
-    email_sent = False
-    error_msg = None
-
-    if RESEND_API_KEY:
-        try:
-            html_content = _build_html(payload.name, payload.email, payload.subject, payload.message)
-            params = {
-                "from": SENDER_EMAIL,
-                "to": [RECIPIENT_EMAIL],
-                "reply_to": payload.email,
-                "subject": f"[DevoGame Contatto] {payload.subject}",
-                "html": html_content,
-            }
-            result = await asyncio.to_thread(resend.Emails.send, params)
-            if result and result.get("id"):
-                email_sent = True
-                await db.contacts.update_one(
-                    {"id": contact_id},
-                    {"$set": {"email_sent": True, "resend_id": result.get("id")}},
-                )
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to send email: {error_msg}")
-
-    return ContactResponse(
-        id=contact_id,
-        status="ok",
-        email_sent=email_sent,
-        message=("Messaggio inviato con successo!" if email_sent else "Messaggio ricevuto. Ti risponderemo a breve."),
-    )
-
-
-@api_router.get("/contacts", response_model=List[dict])
-async def list_contacts():
-    contacts = await db.contacts.find({}, {"_id": 0}).to_list(1000)
-    return contacts
-
-
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-📁 FRONTEND
-/app/frontend/.env
-REACT_APP_BACKEND_URL=https://devogame-main.preview.emergentagent.com
-WDS_SOCKET_PORT=443
-ENABLE_HEALTH_CHECK=false
-/app/frontend/src/index.js
-import React from "react";
-import ReactDOM from "react-dom/client";
-import "@/index.css";
-import App from "@/App";
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
-/app/frontend/src/App.js
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Lenis from "@studio-freight/lenis";
-import Home from "./pages/Home";
-import { Toaster } from "./components/ui/sonner";
-
-function App() {
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-    });
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-    requestAnimationFrame(raf);
-    return () => lenis.destroy();
-  }, []);
-
-  return (
-    <div className="App noise">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-        </Routes>
-      </BrowserRouter>
-      <Toaster theme="dark" position="top-right" />
-    </div>
-  );
-}
-
-export default App;
-/app/frontend/src/App.css
-.App {
-    background-color: #050505;
-    min-height: 100vh;
-}
-/app/frontend/src/index.css
-@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700;800;900&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-html, body, #root {
-    background-color: #050505;
-    color: #ffffff;
-}
-
-body {
-    margin: 0;
-    font-family: 'IBM Plex Sans', system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
-}
-
-::selection { background: #2979FF; color: #fff; }
-
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: #050505; }
-::-webkit-scrollbar-thumb { background: #2979FF; }
-::-webkit-scrollbar-thumb:hover { background: #448AFF; }
-
-.font-display { font-family: 'Unbounded', sans-serif; }
-.font-mono-plex { font-family: 'IBM Plex Mono', monospace; }
-
-.noise::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 1;
-    opacity: 0.04;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-@keyframes marquee {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
-}
-.animate-marquee { animation: marquee 30s linear infinite; }
-
-.nav-link { position: relative; }
-.nav-link::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    bottom: -6px;
-    height: 1px;
-    width: 0;
-    background: #2979FF;
-    transition: width 250ms ease;
-}
-.nav-link:hover::after { width: 100%; }
-
-.grid-pattern {
+  }
+</script>
+<style>
+  body { font-family: 'Inter', sans-serif; background:#050505; color:#fff; }
+  .noise { position: relative; }
+  .grid-pattern {
     background-image:
-        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-    background-size: 80px 80px;
-}
+      linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  html { scroll-behavior: smooth; }
+</style>
+</head>
+<body class="bg-[#050505] text-white">
+<div class="App noise">
+<main class="relative min-h-screen bg-[#050505] text-white">
 
-@layer base {
-    :root {
-        --background: 0 0% 2%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 4%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 4%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 217 100% 58%;
-        --primary-foreground: 0 0% 100%;
-        --secondary: 0 0% 9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 217 100% 58%;
-        --accent-foreground: 0 0% 100%;
-        --destructive: 0 84% 60%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 15%;
-        --input: 0 0% 15%;
-        --ring: 217 100% 58%;
-        --radius: 0;
-    }
-}
-
-@layer base {
-    * { @apply border-border; }
-    body { @apply bg-background text-foreground; }
-}
-/app/frontend/src/pages/Home.jsx
-import Navbar from "../components/Navbar";
-import Hero from "../components/Hero";
-import Marquee from "../components/Marquee";
-import Games from "../components/Games";
-import Team from "../components/Team";
-import Contact from "../components/Contact";
-import Footer from "../components/Footer";
-
-export default function Home() {
-  return (
-    <main data-testid="home-page" className="relative min-h-screen bg-[#050505] text-white">
-      <Navbar />
-      <Hero />
-      <Marquee />
-      <Games />
-      <Team />
-      <Contact />
-      <Footer />
-    </main>
-  );
-}
-/app/frontend/src/lib/data.js
-export const GAMES = [
-  {
-    id: "stadium-rivals",
-    title: "Stadium Rivals",
-    category: "Calcio",
-    year: "2025",
-    status: "In sviluppo",
-    description: "Un'esperienza calcistica next-gen. Tattica, fisica realistica e atmosfere da stadio mai viste prima.",
-    image: "https://static.prod-images.emergentagent.com/jobs/4a7ee3f2-7ec3-4cea-a43a-c31c02425d28/images/f091c140e6c137e92828f14a8ada4b1ba36349622e49a6c2573e75853eeefbf2.png",
-    accent: "#2979FF",
-    span: "lg:col-span-2 lg:row-span-2",
-    code: "DG-001",
-  },
-  {
-    id: "apex-court",
-    title: "Apex Court",
-    category: "Basket",
-    year: "2025",
-    status: "Beta chiusa",
-    description: "Basket arcade con stile street. Movimenti acrobatici, tornei online e modalità carriera profonda.",
-    image: "https://static.prod-images.emergentagent.com/jobs/4a7ee3f2-7ec3-4cea-a43a-c31c02425d28/images/f091c140e6c137e92828f14a8ada4b1ba36349622e49a6c2573e75853eeefbf2.png",
-    accent: "#FF3366",
-    span: "lg:col-span-1",
-    code: "DG-002",
-  },
-  {
-    id: "velocity-circuit",
-    title: "Velocity Circuit",
-    category: "Racing",
-    year: "2026",
-    status: "Annunciato",
-    description: "Corsa simulativa su tracciati iconici, con motore fisico interno e supporto VR completo.",
-    image: "https://images.unsplash.com/photo-1743649978995-c76212449e15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxyYWNpbmclMjBnYW1lfGVufDB8fHx8MTc3ODE0MzA2NHww&ixlib=rb-4.1.0&q=85",
-    accent: "#2979FF",
-    span: "lg:col-span-1",
-    code: "DG-003",
-  },
-  {
-    id: "match-point",
-    title: "Match Point",
-    category: "Tennis",
-    year: "2026",
-    status: "Pre-produzione",
-    description: "Tennis competitivo. Controlli di precisione, AI avanzata e tour ufficiale virtuale.",
-    image: "https://images.unsplash.com/photo-1706675780107-7c43cc487928?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwyfHxmb290YmFsbCUyMHN0YWRpdW0lMjBuaWdodHxlbnwwfHx8fDE3Nzc5OTcxMzl8MA&ixlib=rb-4.1.0&q=85",
-    accent: "#FF3366",
-    span: "lg:col-span-2",
-    code: "DG-004",
-  },
-];
-
-export const TEAM = [
-  {
-    name: "Gabriel Foti",
-    role: "Co-Founder · Lead Developer",
-    bio: "Architetto del motore di gioco DevoGame. Specializzato in fisica real-time e ottimizzazione performance.",
-    skills: ["Engine", "Gameplay", "Multiplayer"],
-  },
-  {
-    name: "Daniele Salerno",
-    role: "Co-Founder · Creative Director",
-    bio: "Visionario creativo dietro l'estetica dei nostri titoli. Direzione artistica, design e narrazione sportiva.",
-    skills: ["Art Direction", "Design", "Brand"],
-  },
-];
-
-export const STATS = [
-  { value: "04", label: "Titoli in produzione" },
-  { value: "02", label: "Co-fondatori" },
-  { value: "100%", label: "Made in Italy" },
-  { value: "2026", label: "Anno di fondazione" },
-];
-/app/frontend/src/components/Navbar.jsx
-import { useEffect, useState } from "react";
-import { Menu, X } from "lucide-react";
-
-const LOGO_URL = "https://customer-assets.emergentagent.com/job_devogame-main/artifacts/krm19l4i_sp.png";
-
-const LINKS = [
-  { id: "giochi", label: "Giochi" },
-  { id: "team", label: "Team" },
-  { id: "contatti", label: "Contatti" },
-];
-
-export const Navbar = () => {
-  const [open, setOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 30);
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
-  const go = (id) => {
-    setOpen(false);
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  return (
-    <header
-      data-testid="site-navbar"
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled ? "bg-black/70 backdrop-blur-xl border-b border-white/10" : "bg-transparent"
-      }`}
-    >
-      <nav className="max-w-[1400px] mx-auto px-6 lg:px-10 h-16 flex items-center justify-between">
-        <button
-          data-testid="logo-button"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex items-center gap-3 group"
-        >
-          <img src={LOGO_URL} alt="DevoGame logo" className="w-9 h-9 object-contain" />
-          <span className="font-display font-black text-lg tracking-tight uppercase group-hover:text-[#2979FF] transition-colors">
-            DevoGame
-          </span>
-        </button>
-
-        <div className="hidden md:flex items-center gap-10">
-          {LINKS.map((l) => (
-            <button
-              key={l.id}
-              data-testid={`nav-${l.id}-link`}
-              onClick={() => go(l.id)}
-              className="nav-link font-mono-plex text-xs tracking-[0.25em] uppercase text-zinc-300 hover:text-white"
-            >
-              {l.label}
-            </button>
-          ))}
+<!-- HERO -->
+<section class="relative min-h-[100vh] flex items-end overflow-hidden">
+  <div class="absolute inset-0">
+    <img alt="" class="w-full h-full object-cover opacity-60" src="https://static.prod-images.emergentagent.com/jobs/4a7ee3f2-7ec3-4cea-a43a-c31c02425d28/images/ee018e84afd2f1b205ea846f906d5e72ef8dab3fe30a0108e58cb194bf22cdcf.png">
+    <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-[#050505]"></div>
+    <div class="absolute inset-0 grid-pattern opacity-50"></div>
+  </div>
+  <div class="relative z-10 max-w-[1400px] mx-auto px-6 lg:px-10 pb-20 lg:pb-28 pt-32 w-full">
+    <div class="flex items-center gap-3 mb-8">
+      <span class="inline-block w-10 h-px bg-[#2979FF]"></span>
+      <span class="font-mono-plex text-xs tracking-[0.3em] uppercase text-[#2979FF]">Studio Italiano · EST. 2026</span>
+    </div>
+    <div class="grid lg:grid-cols-12 gap-8 items-end">
+      <h1 class="lg:col-span-9 font-display font-black uppercase tracking-tighter leading-[0.85] text-5xl sm:text-7xl lg:text-[8rem]">
+        Lo sport<br>
+        <span class="text-[#2979FF]">videoludico</span><br>
+        che mancava.
+      </h1>
+      <div class="lg:col-span-3 lg:pb-4">
+        <p class="text-zinc-300 text-base leading-relaxed mb-6 max-w-sm">
+          DevoGame è uno studio italiano indipendente che sviluppa videogiochi sportivi di nuova generazione. Calcio, basket, tennis, racing — tutto reinventato.
+        </p>
+        <div class="flex flex-col gap-3">
+          <a href="#giochi" class="group flex items-center justify-between gap-4 px-6 py-4 bg-[#2979FF] hover:bg-[#448AFF] text-white border border-[#2979FF] font-display text-xs tracking-[0.25em] uppercase transition-colors">
+            Esplora i giochi
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover:translate-x-1 group-hover:translate-y-1 transition-transform"><path d="m7 7 10 10"></path><path d="M17 7v10H7"></path></svg>
+          </a>
+          <a href="#team" class="flex items-center justify-between gap-4 px-6 py-4 bg-transparent text-white border border-white/20 hover:border-white font-display text-xs tracking-[0.25em] uppercase transition-colors">
+            Conosci il team
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg>
+          </a>
         </div>
+      </div>
+    </div>
+    <div class="mt-16 pt-8 border-t border-white/10 grid grid-cols-2 lg:grid-cols-4 gap-6">
+      <div><div class="font-display font-black text-3xl lg:text-4xl tracking-tighter">04</div><div class="font-mono-plex text-[10px] tracking-[0.25em] uppercase text-zinc-500 mt-2">Titoli in produzione</div></div>
+      <div><div class="font-display font-black text-3xl lg:text-4xl tracking-tighter">02</div><div class="font-mono-plex text-[10px] tracking-[0.25em] uppercase text-zinc-500 mt-2">Co-fondatori</div></div>
+      <div><div class="font-display font-black text-3xl lg:text-4xl tracking-tighter">100%</div><div class="font-mono-plex text-[10px] tracking-[0.25em] uppercase text-zinc-500 mt-2">Made in Italy</div></div>
+      <div><div class="font-display font-black text-3xl lg:text-4xl tracking-tighter">2026</div><div class="font-mono-plex text-[10px] tracking-[0.25em] uppercase text-zinc-500 mt-2">Anno di fondazione</div></div>
+    </div>
+  </div>
+</section>
 
-        <div className="hidden md:block">
-          <button
-            data-testid="nav-cta-button"
-            onClick={() => go("contatti")}
-            className="font-display text-xs tracking-[0.25em] uppercase px-5 py-2.5 bg-[#2979FF] hover:bg-[#448AFF] text-white border border-[#2979FF] transition-colors"
-          >
-            Lavora con noi
-          </button>
+<!-- MARQUEE -->
+<section class="relative border-y border-white/10 bg-[#050505] py-6 overflow-hidden">
+  <div class="flex gap-12 whitespace-nowrap animate-marquee" style="width:max-content">
+    <!-- doppia ripetizione per loop fluido -->
+    <script>document.write(Array(2).fill(`
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">CALCIO</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">BASKET</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">TENNIS</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">RACING</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">NEXT-GEN</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">MADE IN ITALY</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+      <div class="flex items-center gap-12 shrink-0"><span class="font-display font-black uppercase text-2xl lg:text-3xl tracking-tighter text-white">INDIE STUDIO</span><span class="w-2 h-2 bg-[#2979FF]"></span></div>
+    `).join(''));</script>
+  </div>
+</section>
+
+<!-- GIOCHI -->
+<section id="giochi" class="relative py-24 lg:py-32 bg-[#050505] border-b border-white/10">
+  <div class="max-w-[1400px] mx-auto px-6 lg:px-10">
+    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 mb-16">
+      <div>
+        <div class="flex items-center gap-3 mb-6"><span class="font-mono-plex text-xs tracking-[0.3em] uppercase text-[#2979FF]">01 — I nostri giochi</span></div>
+        <h2 class="font-display font-black uppercase tracking-tighter text-4xl sm:text-5xl lg:text-7xl leading-[0.9]">Quattro titoli.<br><span class="text-[#2979FF]">Una sola visione.</span></h2>
+      </div>
+      <p class="lg:max-w-sm text-zinc-400 text-base leading-relaxed">Ogni gioco DevoGame nasce con un obiettivo chiaro: ridefinire un genere sportivo classico con tecnologia, stile e gameplay indimenticabile.</p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:auto-rows-[280px]">
+      <!-- Stadium Rivals -->
+      <article class="group relative overflow-hidden border border-white/10 hover:border-[#2979FF] bg-zinc-950 transition-colors duration-500 lg:col-span-2 lg:row-span-2">
+        <div class="absolute inset-0">
+          <img alt="Stadium Rivals" class="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-105 transition-all duration-700" src="https://static.prod-images.emergentagent.com/jobs/4a7ee3f2-7ec3-4cea-a43a-c31c02425d28/images/f091c140e6c137e92828f14a8ada4b1ba36349622e49a6c2573e75853eeefbf2.png">
+          <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
         </div>
-
-        <button
-          data-testid="mobile-menu-toggle"
-          className="md:hidden p-2"
-          onClick={() => setOpen((s) => !s)}
-          aria-label="Menu"
-        >
-          {open ? <X size={22} /> : <Menu size={22} />}
-        </button>
-      </nav>
-
-      {open && (
-        <div data-testid="mobile-menu" className="md:hidden bg-black/95 backdrop-blur-xl border-t border-white/10">
-          <div className="px-6 py-6 flex flex-col gap-4">
-            {LINKS.map((l) => (
-              <button
-                key={l.id}
-                data-testid={`mobile-nav-${l.id}-link`}
-                onClick={() => go(l.id)}
-                className="text-left font-display text-2xl uppercase tracking-tight"
-              >
-                {l.label}
-              </button>
-            ))}
-            <button
-              data-testid="mobile-nav-cta-button"
-              onClick={() => go("contatti")}
-              className="mt-4 font-display text-xs tracking-[0.25em] uppercase px-5 py-3 bg-[#2979FF] text-white"
-            >
-              Lavora con noi
-            </button>
+        <div class="relative z-10 h-full flex flex-col justify-between p-6 lg:p-8 min-h-[280px]">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF] block mb-2">DG-001 · Calcio</span>
+              <span class="inline-block px-2 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">In sviluppo</span>
+            </div>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-[#2979FF] group-hover:-translate-y-1 group-hover:translate-x-1 transition-all duration-300"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg>
+          </div>
+          <div>
+            <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl mb-3 leading-none">Stadium Rivals</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed max-w-md">Un'esperienza calcistica next-gen con fisica realistica, modalità manageriale e online cross-platform.</p>
+            <div class="mt-4 flex items-center gap-3 text-zinc-500">
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase">Release</span>
+              <span class="font-display text-sm tracking-tight">2026</span>
+            </div>
           </div>
         </div>
-      )}
-    </header>
-  );
-};
+      </article>
+
+      <!-- Apex Court -->
+      <article class="group relative overflow-hidden border border-white/10 hover:border-[#2979FF] bg-zinc-950 transition-colors duration-500 lg:col-span-1">
+        <div class="absolute inset-0">
+          <img alt="Apex Court" class="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-105 transition-all duration-700" src="https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&q=80&w=1200">
+          <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
+        </div>
+        <div class="relative z-10 h-full flex flex-col justify-between p-6 lg:p-8 min-h-[280px]">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF] block mb-2">DG-002 · Basket</span>
+              <span class="inline-block px-2 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">In sviluppo</span>
+            </div>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-[#2979FF] group-hover:-translate-y-1 group-hover:translate-x-1 transition-all duration-300"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg>
+          </div>
+          <div>
+            <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl mb-3 leading-none">Apex Court</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed max-w-md">Basket arcade con stile street. Movimenti acrobatici, tornei online e modalità carriera profonda.</p>
+            <div class="mt-4 flex items-center gap-3 text-zinc-500">
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase">Release</span>
+              <span class="font-display text-sm tracking-tight">2025</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Velocity Circuit -->
+      <article class="group relative overflow-hidden border border-white/10 hover:border-[#2979FF] bg-zinc-950 transition-colors duration-500 lg:col-span-1">
+        <div class="absolute inset-0">
+          <img alt="Velocity Circuit" class="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-105 transition-all duration-700" src="https://images.unsplash.com/photo-1743649978995-c76212449e15?crop=entropy&cs=srgb&fm=jpg&q=85">
+          <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
+        </div>
+        <div class="relative z-10 h-full flex flex-col justify-between p-6 lg:p-8 min-h-[280px]">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF] block mb-2">DG-003 · Racing</span>
+              <span class="inline-block px-2 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Annunciato</span>
+            </div>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-[#2979FF] group-hover:-translate-y-1 group-hover:translate-x-1 transition-all duration-300"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg>
+          </div>
+          <div>
+            <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl mb-3 leading-none">Velocity Circuit</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed max-w-md">Corsa simulativa su tracciati iconici, con motore fisico interno e supporto VR completo.</p>
+            <div class="mt-4 flex items-center gap-3 text-zinc-500">
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase">Release</span>
+              <span class="font-display text-sm tracking-tight">2026</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Match Point -->
+      <article class="group relative overflow-hidden border border-white/10 hover:border-[#2979FF] bg-zinc-950 transition-colors duration-500 lg:col-span-2">
+        <div class="absolute inset-0">
+          <img alt="Match Point" class="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-105 transition-all duration-700" src="https://images.unsplash.com/photo-1706675780107-7c43cc487928?crop=entropy&cs=srgb&fm=jpg&q=85">
+          <div class="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent"></div>
+        </div>
+        <div class="relative z-10 h-full flex flex-col justify-between p-6 lg:p-8 min-h-[280px]">
+          <div class="flex items-start justify-between">
+            <div>
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF] block mb-2">DG-004 · Tennis</span>
+              <span class="inline-block px-2 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Pre-produzione</span>
+            </div>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 group-hover:text-[#2979FF] group-hover:-translate-y-1 group-hover:translate-x-1 transition-all duration-300"><path d="M7 7h10v10"></path><path d="M7 17 17 7"></path></svg>
+          </div>
+          <div>
+            <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl mb-3 leading-none">Match Point</h3>
+            <p class="text-zinc-400 text-sm leading-relaxed max-w-md">Tennis competitivo. Controlli di precisione, AI avanzata e tour ufficiale virtuale.</p>
+            <div class="mt-4 flex items-center gap-3 text-zinc-500">
+              <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase">Release</span>
+              <span class="font-display text-sm tracking-tight">2026</span>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- TEAM -->
+<section id="team" class="relative py-24 lg:py-32 bg-[#050505] border-b border-white/10">
+  <div class="max-w-[1400px] mx-auto px-6 lg:px-10">
+    <div class="grid lg:grid-cols-12 gap-8 mb-16 items-end">
+      <div class="lg:col-span-8">
+        <div class="flex items-center gap-3 mb-6"><span class="font-mono-plex text-xs tracking-[0.3em] uppercase text-[#2979FF]">02 — Il team</span></div>
+        <h2 class="font-display font-black uppercase tracking-tighter text-4xl sm:text-5xl lg:text-7xl leading-[0.9]">Due menti.<br><span class="text-[#2979FF]">Un solo obiettivo.</span></h2>
+      </div>
+      <p class="lg:col-span-4 text-zinc-400 text-base leading-relaxed">DevoGame nasce dalla collaborazione di due co-fondatori italiani, uniti dalla passione per lo sport e per il game design di alto livello.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6 lg:gap-10">
+      <!-- Member 1 -->
+      <div class="group border border-white/10 hover:border-[#2979FF] transition-colors duration-500 bg-zinc-950">
+        <div class="aspect-[4/5] overflow-hidden border-b border-white/10 relative bg-[#0a0a0a]">
+          <div class="absolute inset-0 grid-pattern opacity-60"></div>
+          <div class="absolute inset-0" style="background: radial-gradient(rgba(41,121,255,0.18) 0%, rgba(5,5,5,0) 65%);"></div>
+          <div class="relative z-10 h-full w-full flex items-center justify-center">
+            <span aria-hidden="true" class="font-display font-black uppercase tracking-tighter text-[#2979FF] leading-none select-none transition-transform duration-700 group-hover:scale-105" style="font-size: clamp(7rem, 14vw, 14rem);">GF</span>
+          </div>
+          <div class="absolute top-4 left-4 px-2 py-1 bg-black/70 backdrop-blur-md border border-white/10">
+            <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF]">01 / 02</span>
+          </div>
+          <div class="absolute bottom-4 right-4 font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500">Co-Founder</div>
+        </div>
+        <div class="p-6 lg:p-8">
+          <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl leading-none mb-2">Gabriel Foti</h3>
+          <p class="font-mono-plex text-xs tracking-[0.2em] uppercase text-[#2979FF] mb-5">Co-Founder · Lead Developer</p>
+          <p class="text-zinc-400 text-sm leading-relaxed mb-6">Architetto del motore di gioco DevoGame. Specializzato in fisica real-time e ottimizzazione performance.</p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Engine</span>
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Gameplay</span>
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Multiplayer</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Member 2 -->
+      <div class="group border border-white/10 hover:border-[#2979FF] transition-colors duration-500 bg-zinc-950">
+        <div class="aspect-[4/5] overflow-hidden border-b border-white/10 relative bg-[#0a0a0a]">
+          <div class="absolute inset-0 grid-pattern opacity-60"></div>
+          <div class="absolute inset-0" style="background: radial-gradient(rgba(41,121,255,0.18) 0%, rgba(5,5,5,0) 65%);"></div>
+          <div class="relative z-10 h-full w-full flex items-center justify-center">
+            <span aria-hidden="true" class="font-display font-black uppercase tracking-tighter text-[#2979FF] leading-none select-none transition-transform duration-700 group-hover:scale-105" style="font-size: clamp(7rem, 14vw, 14rem);">DS</span>
+          </div>
+          <div class="absolute top-4 left-4 px-2 py-1 bg-black/70 backdrop-blur-md border border-white/10">
+            <span class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-[#2979FF]">02 / 02</span>
+          </div>
+          <div class="absolute bottom-4 right-4 font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500">Co-Founder</div>
+        </div>
+        <div class="p-6 lg:p-8">
+          <h3 class="font-display font-black uppercase tracking-tighter text-3xl lg:text-4xl leading-none mb-2">Daniele Salerno</h3>
+          <p class="font-mono-plex text-xs tracking-[0.2em] uppercase text-[#2979FF] mb-5">Co-Founder · Creative Director</p>
+          <p class="text-zinc-400 text-sm leading-relaxed mb-6">Visionario creativo dietro l'estetica dei nostri titoli. Direzione artistica, design e narrazione sportiva.</p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Art Direction</span>
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Design</span>
+            <span class="px-3 py-1 border border-white/20 font-mono-plex text-[10px] tracking-widest uppercase text-zinc-300">Brand</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTATTI -->
+<section id="contatti" class="relative py-24 lg:py-32 bg-[#050505] border-b border-white/10">
+  <div class="max-w-[1400px] mx-auto px-6 lg:px-10">
+    <div class="grid lg:grid-cols-12 gap-12 lg:gap-16">
+      <div class="lg:col-span-5">
+        <div class="flex items-center gap-3 mb-6"><span class="font-mono-plex text-xs tracking-[0.3em] uppercase text-[#2979FF]">03 — Contatti</span></div>
+        <h2 class="font-display font-black uppercase tracking-tighter text-4xl sm:text-5xl lg:text-6xl leading-[0.9] mb-8">Scrivici.<br><span class="text-[#2979FF]">Costruiamo qualcosa.</span></h2>
+        <p class="text-zinc-400 text-base leading-relaxed mb-12 max-w-md">Hai un'idea, un progetto o vuoi entrare nel team? Compila il form o scrivici direttamente. Rispondiamo entro 48 ore.</p>
+        <div class="space-y-5">
+          <a href="mailto:devogamesrl@gmail.com" class="group flex items-center gap-4 border-t border-white/10 pt-5 hover:border-[#2979FF] transition-colors">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[#2979FF] shrink-0"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path><rect x="2" y="4" width="20" height="16" rx="2"></rect></svg>
+            <div>
+              <div class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-1">Email</div>
+              <div class="font-display text-base lg:text-lg group-hover:text-[#2979FF] transition-colors">devogamesrl@gmail.com</div>
+            </div>
+          </a>
+          <div class="flex items-center gap-4 border-t border-white/10 pt-5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[#2979FF] shrink-0"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"></path><circle cx="12" cy="10" r="3"></circle></svg>
+            <div>
+              <div class="font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-1">Sede</div>
+              <div class="font-display text-base lg:text-lg">Via Vittorio, 162 · Bisceglie</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <form class="lg:col-span-7 border border-white/10 bg-zinc-950 p-6 lg:p-10" action="mailto:devogamesrl@gmail.com" method="POST" enctype="text/plain">
+        <div class="grid sm:grid-cols-2 gap-6 mb-6">
+          <div>
+            <label class="block font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-3">Nome</label>
+            <input required placeholder="Mario Rossi" name="name" class="w-full bg-transparent border-0 border-b border-white/20 focus:border-[#2979FF] outline-none px-0 py-3 text-white placeholder:text-zinc-600 transition-colors">
+          </div>
+          <div>
+            <label class="block font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-3">Email</label>
+            <input required type="email" placeholder="tu@email.com" name="email" class="w-full bg-transparent border-0 border-b border-white/20 focus:border-[#2979FF] outline-none px-0 py-3 text-white placeholder:text-zinc-600 transition-colors">
+          </div>
+        </div>
+        <div class="mb-6">
+          <label class="block font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-3">Oggetto</label>
+          <input placeholder="Collaborazione, supporto, idea..." name="subject" class="w-full bg-transparent border-0 border-b border-white/20 focus:border-[#2979FF] outline-none px-0 py-3 text-white placeholder:text-zinc-600 transition-colors">
+        </div>
+        <div class="mb-8">
+          <label class="block font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-500 mb-3">Messaggio</label>
+          <textarea name="message" required rows="5" placeholder="Scrivi qui il tuo messaggio..." class="w-full bg-transparent border-0 border-b border-white/20 focus:border-[#2979FF] outline-none px-0 py-3 text-white placeholder:text-zinc-600 resize-none transition-colors"></textarea>
+        </div>
+        <button type="submit" class="group w-full sm:w-auto flex items-center justify-center gap-4 px-8 py-4 bg-[#2979FF] hover:bg-[#448AFF] text-white border border-[#2979FF] font-display text-xs tracking-[0.25em] uppercase transition-colors">
+          Invia messaggio
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover:translate-x-1 transition-transform"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></svg>
+        </button>
+        <p class="mt-6 font-mono-plex text-[10px] tracking-[0.2em] uppercase text-zinc-600">Inviando il form accetti di essere ricontattato all'email indicata.</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="py-10 text-center font-mono-plex text-[10px] tracking-[0.3em] uppercase text-zinc-600">
+  © 2026 DevoGame · Made in Italy
+</footer>
+
+</main>
+</div>
+</body>
+</html>
